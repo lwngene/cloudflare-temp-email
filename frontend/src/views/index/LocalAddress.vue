@@ -1,0 +1,149 @@
+<script setup lang="ts">
+import { ref, h, computed } from 'vue';
+import { useLocalStorage } from '@vueuse/core';
+import { useScopedI18n } from '@/i18n/app'
+import { NPopconfirm, NButton, NTag } from 'naive-ui'
+import { decodeAddressToken } from '../../utils/local-address-cache'
+
+// @ts-ignore
+import { useGlobalState } from '../../store'
+// @ts-ignore
+import Login from '../common/Login.vue';
+
+const { jwt, openSettings } = useGlobalState()
+// @ts-ignore
+const message = useMessage()
+
+const { t } = useScopedI18n('views.index.LocalAddress')
+const { t: loginT } = useScopedI18n('views.common.Login')
+
+const tabValue = ref('address')
+const localAddressCache = useLocalStorage("LocalAddressCache", []);
+const data = computed(() => {
+    // @ts-ignore
+    if (!localAddressCache.value.includes(jwt.value)) {
+        // @ts-ignore
+        localAddressCache.value.push(jwt.value)
+    }
+    return localAddressCache.value.map((curJwt: string) => {
+        const payload = decodeAddressToken(curJwt);
+        if (!payload) return { valid: false, address: `invalid jwt [${curJwt}]`, jwt: curJwt };
+        return {
+            valid: true,
+            address: payload.address,
+            loginMethod: payload.type === 'address_password_login' ? 'passwordLogin' : 'credentialLogin',
+            jwt: curJwt
+        }
+    })
+})
+
+const bindAddress = async () => {
+    try {
+        // @ts-ignore
+        if (!localAddressCache.value.includes(jwt.value)) {
+            // @ts-ignore
+            localAddressCache.value.push(jwt.value)
+        }
+        tabValue.value = 'address'
+        message.success(t('bindAddressSuccess'));
+    } catch (error) {
+        message.error((error as Error).message || "error");
+    }
+}
+
+const columns = [
+    {
+        title: t('address'),
+        key: "address"
+    },
+    {
+        title: t('loginMethod'),
+        key: 'loginMethod',
+        render: (row: any) => row.loginMethod
+            ? h(NTag, { size: 'small', bordered: false }, () => loginT(row.loginMethod))
+            : null,
+    },
+    {
+        title: t('actions'),
+        key: 'actions',
+        render(row: any) {
+            return h('div', [
+                (!openSettings.value.addressPasswordLoginOnly || row.loginMethod === 'passwordLogin') ? h(NPopconfirm,
+                    {
+                        onPositiveClick: () => {
+                            jwt.value = row.jwt
+                            location.reload()
+                        }
+                    },
+                    {
+                        trigger: () => h(NButton,
+                            {
+                                tertiary: true,
+                                type: "primary",
+                            },
+                            { default: () => t('changeMailAddress') }
+                        ),
+                        default: () => `${t('changeMailAddress')}?`
+                    }
+                ) : null,
+                h(NPopconfirm,
+                    {
+                        onPositiveClick: () => {
+                            if (jwt.value === row.jwt) {
+                                return;
+                            }
+                            localAddressCache.value = localAddressCache.value.filter(
+                                (curJwt: string) => curJwt !== row.jwt
+                            );
+                        }
+                    },
+                    {
+                        trigger: () => h(NButton,
+                            {
+                                tertiary: true,
+                                disabled: jwt.value === row.jwt,
+                                type: "warning",
+                            },
+                            { default: () => t('unbindMailAddress') }
+                        ),
+                        default: () => `${t('unbindMailAddress')}?`
+                    }
+                )
+            ])
+        }
+    }
+]
+const visibleColumns = computed(() => {
+    const methods = new Set(data.value.filter(row => row.valid).map(row => row.loginMethod));
+    return methods.size > 1 ? columns : columns.filter(column => column.key !== 'loginMethod');
+})
+</script>
+
+<template>
+    <div>
+        <n-alert type="warning" :show-icon="false" :bordered="false">
+            <span>{{ t('tip') }}</span>
+        </n-alert>
+        <n-tabs type="segment" v-model:value="tabValue">
+            <n-tab-pane name="address" :tab="t('address')">
+                <div class="address-table-scroll">
+                    <n-data-table :columns="visibleColumns" :data="data" :bordered="false" embedded />
+                </div>
+            </n-tab-pane>
+            <n-tab-pane name="create_or_bind" :tab="t('create_or_bind')">
+                <Login :bindUserAddress="bindAddress" />
+            </n-tab-pane>
+        </n-tabs>
+    </div>
+</template>
+
+<style scoped>
+.n-data-table {
+    min-width: 640px;
+}
+
+.address-table-scroll {
+    max-width: 100%;
+    overflow-x: auto;
+}
+</style>
